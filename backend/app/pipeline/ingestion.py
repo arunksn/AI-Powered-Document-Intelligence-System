@@ -27,7 +27,7 @@ def detect_format(filename: str) -> str:
         return "pdf"
     if ext in ("docx",):
         return "docx"
-    if ext in ("xlsx", "xls"):
+    if ext in ("xlsx",):
         return "xlsx"
     raise ValueError(f"Unsupported file format: .{ext}")
 
@@ -130,10 +130,15 @@ def _normalize_docx(filepath: str) -> dict:
     sections = []
     full_text_parts = []
     for para in d.paragraphs:
-        text = para.text.strip()
+        text = para.text.strip() if para.text else ""
         if not text:
             continue
-        style = (para.style.name or "").lower()
+        style_name = (
+            para.style.name
+            if (para.style and hasattr(para.style, "name") and para.style.name)
+            else ""
+        )
+        style = style_name.lower()
         is_heading = style.startswith("heading") or style == "title"
         level = 0
         if is_heading:
@@ -148,7 +153,7 @@ def _normalize_docx(filepath: str) -> dict:
 
     tables = []
     for i, table in enumerate(d.tables):
-        rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+        rows = [[cell.text.strip() if cell.text else "" for cell in row.cells] for row in table.rows]
         tables.append({"sheet": f"table_{i + 1}", "rows": rows})
 
     return {
