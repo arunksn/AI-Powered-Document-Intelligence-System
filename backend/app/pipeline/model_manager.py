@@ -46,16 +46,18 @@ def _loader_for(name: str):
             import spacy
             try:
                 return spacy.load("en_core_web_sm")
-            except OSError:
-                # Model not downloaded (e.g. fresh container before
-                # `python -m spacy download` ran) -- fail loudly with a
-                # clear message rather than crashing the whole pipeline.
-                raise RuntimeError(
-                    "spaCy model 'en_core_web_sm' not installed. "
-                    "Run: python -m spacy download en_core_web_sm"
-                )
+            except Exception as err:
+                logger.warning("Failed to load en_core_web_sm (%s), attempting dynamic download...", err)
+                try:
+                    import subprocess, sys
+                    subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"], check=True)
+                    return spacy.load("en_core_web_sm")
+                except Exception as dl_err:
+                    logger.error("Could not download en_core_web_sm, falling back to spacy.blank('en'): %s", dl_err)
+                    return spacy.blank("en")
         return _load
     raise ValueError(f"Unknown model: {name}")
+
 
 
 def _evict_all_except(keep: str | None):

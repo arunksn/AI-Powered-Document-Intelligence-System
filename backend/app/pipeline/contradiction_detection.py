@@ -11,6 +11,35 @@ Returns a list of dicts matching the Contradiction model shape.
 """
 
 
+def _normalise_party(value: str) -> str:
+    import re
+    value = re.sub(r"[^a-z0-9]+", " ", (value or "").lower())
+    stop = {"inc", "incorporated", "llc", "ltd", "limited", "corp", "corporation", "co", "company", "the"}
+    return " ".join(token for token in value.split() if token not in stop)
+
+
+def _party_set(document: dict) -> set[str]:
+    entities = document.get("extracted_entities") or {}
+    values = list(document.get("primary_parties") or [])
+    vendor = entities.get("vendor")
+    if vendor:
+        values.append(vendor)
+    result = set()
+    for value in values:
+        norm = _normalise_party(value)
+        if norm:
+            result.add(norm)
+            # Also keep distinctive tokens for cases like "Acme Manufacturing"
+            # vs "Acme Manufacturing Inc.".
+            result.update(t for t in norm.split() if len(t) >= 4)
+    return result
+
+
+def _shares_party(a: dict, b: dict) -> bool:
+    pa, pb = _party_set(a), _party_set(b)
+    return bool(pa and pb and pa & pb)
+
+
 def find_contradictions(documents: list[dict]) -> list[dict]:
     """
     `documents` is a list of dicts: {id, document_type, extracted_entities,
@@ -66,10 +95,8 @@ def find_contradictions(documents: list[dict]) -> list[dict]:
         for j in range(i + 1, len(numeric_term_docs)):
             doc_a, days_a = numeric_term_docs[i]
             doc_b, days_b = numeric_term_docs[j]
-            parties_a = set(p.lower() for p in (doc_a.get("primary_parties") or []))
-            parties_b = set(p.lower() for p in (doc_b.get("primary_parties") or []))
-            if not parties_a or not parties_b or not (parties_a & parties_b):
-                continue  # only compare documents that share a party
+            if not _shares_party(doc_a, doc_b):
+                continue  # only compare documents that share a counterparty/vendor
             if days_a != days_b:
                 contradictions.append({
                     "document_a_id": doc_a["id"],

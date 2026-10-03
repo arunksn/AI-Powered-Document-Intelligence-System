@@ -33,59 +33,67 @@ def _first_number(pattern: str, text: str):
     return m.group(1) if m else None
 
 
+NAMED_CLAUSE_PATTERNS = {
+    "payment_terms": ["payment terms", "payment conditions", "shall pay", "invoice within"],
+    "termination": ["termination", "terminate this agreement", "termination for convenience", "termination for cause"],
+    "liability_cap": ["limitation of liability", "liability cap", "liable", "total liability"],
+    "ip_assignment": ["intellectual property", "work product", "assignment of ip", "intellectual property rights"],
+    "non_compete": ["non-compete", "noncompete", "restraint of trade", "non-solicitation", "nonsolicitation"],
+    "confidentiality": ["confidentiality", "confidential information", "confidentiality period", "non-disclosure"],
+    "governing_law": ["governing law", "laws of", "choice of law"],
+    "dispute_resolution": ["dispute resolution", "arbitration", "mediation", "jurisdiction and venue"],
+    "indemnification": ["indemnification", "indemnify", "hold harmless"],
+    "insurance": ["insurance", "commercial general liability", "professional liability"],
+    "force_majeure": ["force majeure", "act of god"],
+    "assignment": ["assignment", "assign this agreement", "assign its rights"],
+    "renewal": ["renewal", "automatic renewal", "renew automatically"],
+    "warranty": ["warranty", "warranties", "warrants that"],
+    "audit": ["audit rights", "right to audit", "inspection rights"],
+}
+
+
+def _extract_generic_clause_values(name: str, window: str) -> dict:
+    values = {}
+    days = _first_number(DAYS_RE, window)
+    years = _first_number(r"(\d{1,2})\s*years?", window)
+    amounts = re.findall(MONEY_RE, window)
+    if days:
+        values["days"] = int(days)
+    if years:
+        values["years"] = int(years)
+    if amounts:
+        values["amounts"] = amounts[:8]
+    return values
+
+
 def extract_contract_or_nda(raw_text: str) -> dict:
     clauses = {}
 
-    payment_window = _find_clause_window(raw_text, ["payment terms", "shall pay", "invoice within"])
-    if payment_window:
-        days = _first_number(DAYS_RE, payment_window)
-        clauses["payment_terms"] = {
-            "found": True,
-            "days": int(days) if days else None,
-            "excerpt": payment_window.strip(),
-        }
+    for name, keywords in NAMED_CLAUSE_PATTERNS.items():
+        window = _find_clause_window(raw_text, keywords)
+        if not window:
+            continue
+        values = _extract_generic_clause_values(name, window)
+        values["found"] = True
+        values["excerpt"] = window.strip()
+        clauses[name] = values
 
-    term_window = _find_clause_window(raw_text, ["termination", "terminate this agreement"])
-    if term_window:
-        days = _first_number(DAYS_RE, term_window)
-        clauses["termination"] = {
-            "found": True,
-            "notice_days": int(days) if days else None,
-            "excerpt": term_window.strip(),
-        }
+    # Preserve the existing specialised field names consumed by anomaly/risk
+    # logic while also exposing richer generic values above.
+    if "termination" in clauses:
+        clauses["termination"]["notice_days"] = clauses["termination"].get("days")
+    if "confidentiality" in clauses:
+        clauses["confidentiality"]["period_days"] = clauses["confidentiality"].get("days")
+        clauses["confidentiality"]["period_years"] = clauses["confidentiality"].get("years")
 
-    liability_window = _find_clause_window(raw_text, ["liability", "limitation of liability", "liable"])
-    if liability_window:
-        amounts = re.findall(MONEY_RE, liability_window)
-        clauses["liability_cap"] = {
-            "found": True,
-            "amounts": amounts,
-            "excerpt": liability_window.strip(),
-        }
+    required_clauses = ["payment_terms", "termination", "liability_cap", "confidentiality"]
+    missing = [c for c in required_clauses if c not in clauses]
 
-    ip_window = _find_clause_window(raw_text, ["intellectual property", "work product", "assignment of ip"])
-    if ip_window:
-        clauses["ip_assignment"] = {"found": True, "excerpt": ip_window.strip()}
-
-    noncompete_window = _find_clause_window(raw_text, ["non-compete", "noncompete", "restraint of trade"])
-    if noncompete_window:
-        clauses["non_compete"] = {"found": True, "excerpt": noncompete_window.strip()}
-
-    conf_window = _find_clause_window(raw_text, ["confidential", "confidentiality period", "non-disclosure"])
-    if conf_window:
-        days = _first_number(DAYS_RE, conf_window)
-        years = _first_number(r"(\d{1,2})\s*years?", conf_window)
-        clauses["confidentiality"] = {
-            "found": True,
-            "period_days": int(days) if days else None,
-            "period_years": int(years) if years else None,
-            "excerpt": conf_window.strip(),
-        }
-
-    standard_clauses = ["payment_terms", "termination", "liability_cap", "confidentiality"]
-    missing = [c for c in standard_clauses if c not in clauses]
-
-    return {"clauses": clauses, "missing_standard_clauses": missing}
+    return {
+        "clauses": clauses,
+        "named_clauses_detected": sorted(clauses.keys()),
+        "missing_standard_clauses": missing,
+    }
 
 
 SUMMARY_ROW_LABELS = {"tax", "total", "subtotal", "sub-total", "shipping", "discount", "grand total"}
