@@ -172,6 +172,7 @@ export default function DocumentDetail() {
               <div className="grid grid-cols-2 gap-x-6 mb-3">
                 <EntityField label="Parties" value={document.primary_parties} />
                 <EntityField label="Jurisdiction" value={document.governing_jurisdiction} />
+                <EntityField label="Dates" value={Object.values(document.key_dates || {}).flat()} />
               </div>
               <ExtractionPanel documentType={document.document_type} entities={document.extracted_entities} />
             </div>
@@ -189,7 +190,15 @@ export default function DocumentDetail() {
                       {grouped[sev].map((a) => (
                         <div key={a.id} className="flex items-start gap-3 border border-hairline rounded-md p-3 bg-surface mb-2">
                           <SeverityBadge severity={a.severity} />
-                          <p className="text-sm text-ink">{a.explanation}</p>
+                          <div>
+                            <p className="text-sm text-ink">{a.explanation}</p>
+                            {a.evidence && Object.keys(a.evidence).length > 0 && (
+                              <details className="mt-2">
+                                <summary className="cursor-pointer text-xs font-mono text-inkfaint">View evidence</summary>
+                                <pre className="mt-2 text-xs font-mono text-inkfaint whitespace-pre-wrap">{JSON.stringify(a.evidence, null, 2)}</pre>
+                              </details>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
