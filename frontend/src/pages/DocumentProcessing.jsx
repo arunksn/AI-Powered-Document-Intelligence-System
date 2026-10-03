@@ -5,7 +5,7 @@ import { useDocumentSocket } from "../ws.js";
 import StageCard from "../components/StageCard.jsx";
 import SeverityBadge from "../components/SeverityBadge.jsx";
 
-const STAGE_ORDER = [0, 1, 2, 3, 4];
+const STAGE_ORDER = [0, 1, 2, 3, 4, 5];
 
 function renderStageOutput(stageNumber, output) {
   if (!output) return null;
@@ -52,6 +52,14 @@ function renderStageOutput(stageNumber, output) {
       </p>
     );
   }
+  if (stageNumber === 5) {
+    return (
+      <p className="text-sm">
+        Compared <span className="font-mono">{output.documents_compared || 0}</span> documents and found
+        <span className="font-mono mx-1">{output.contradiction_count || 0}</span> contradiction(s).
+      </p>
+    );
+  }
   return (
     <pre className="text-xs font-mono text-inkfaint whitespace-pre-wrap break-words">
       {JSON.stringify(output, null, 2)}
@@ -92,9 +100,6 @@ export default function DocumentProcessing() {
     }
     if (msg.type === "status") {
       setDocument((prev) => (prev ? { ...prev, status: msg.status, error_message: msg.error || prev.error_message } : prev));
-      if (msg.status === "complete") {
-        setTimeout(() => navigate(`/documents/${documentId}`), 900);
-      }
     }
   });
 
@@ -111,10 +116,42 @@ export default function DocumentProcessing() {
       </p>
 
       {document.status === "failed" && (
-        <div className="mt-4 border border-critical/30 bg-critical/5 rounded-md p-4 text-sm text-critical">
-          Processing failed: {document.error_message || "Unknown error."}
+        <div className="mt-4 border border-critical/30 bg-critical/5 rounded-md p-4 text-sm text-critical flex items-center justify-between">
+          <div>
+            <p className="font-semibold">Processing Failed</p>
+            <p className="mt-0.5">{document.error_message || "An unexpected error occurred during processing."}</p>
+          </div>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await api.reprocessDocument(documentId);
+                setDocument((prev) => ({ ...prev, status: "queued", error_message: null }));
+                setStages({});
+                load();
+              } catch (err) {
+                alert("Failed to reprocess: " + err.message);
+              }
+            }}
+            className="font-mono text-xs uppercase tracking-wide px-3 py-1.5 rounded bg-critical text-white hover:bg-critical/80 transition"
+          >
+            Retry Processing
+          </button>
         </div>
       )}
+
+      {document.status === "complete" && (
+        <div className="mt-5 flex items-center justify-between border border-ok/20 bg-ok/5 rounded-md p-3">
+          <p className="text-sm text-ink">Processing is complete. You can review the full document intelligence report.</p>
+          <button
+            onClick={() => navigate(`/documents/${documentId}`)}
+            className="font-mono text-xs uppercase tracking-wide px-3 py-1.5 rounded bg-ledger text-white hover:bg-ledgerlight transition"
+          >
+            Open report
+          </button>
+        </div>
+      )}
+
 
       <div className="mt-8">
         {STAGE_ORDER.map((num) => {
@@ -136,5 +173,5 @@ export default function DocumentProcessing() {
 }
 
 function defaultStageName(num) {
-  return ["Ingestion & Normalisation", "Document Classification", "Entity & Clause Extraction", "Anomaly Detection", "Risk Scoring"][num];
+  return ["Ingestion & Normalisation", "Document Classification", "Entity & Clause Extraction", "Anomaly Detection", "Risk Scoring", "Cross-Document Contradiction Check"][num];
 }

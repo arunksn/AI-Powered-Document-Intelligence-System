@@ -32,12 +32,13 @@ export default function ProjectDetail() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Poll while any document is still processing, so the list picks up
-  // stage transitions even if the user isn't on the per-document page.
+  // Keep the project list fresh while documents process. The per-document
+  // pipeline itself uses WebSockets; this refresh only keeps project-level
+  // document statuses and contradiction results current.
   useEffect(() => {
     const hasActive = documents.some((d) => d.status === "queued" || d.status === "processing");
     if (!hasActive) return;
-    const t = setInterval(load, 3000);
+    const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [documents, load]);
 
@@ -103,7 +104,7 @@ export default function ProjectDetail() {
           type="file"
           multiple
           className="hidden"
-          accept=".pdf,.docx,.xlsx,.xls,.jpg,.jpeg,.png"
+          accept=".pdf,.docx,.xlsx,.jpg,.jpeg,.png"
           onChange={(e) => handleFiles(Array.from(e.target.files))}
         />
       </div>
