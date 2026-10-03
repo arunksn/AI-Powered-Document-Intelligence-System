@@ -3,10 +3,13 @@ import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
 import ProtectedRoute from "./auth/ProtectedRoute.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import SignupPage from "./pages/SignupPage.jsx";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage.jsx";
+import ResetPasswordPage from "./pages/ResetPasswordPage.jsx";
 import ProjectsView from "./pages/ProjectsView.jsx";
 import ProjectDetail from "./pages/ProjectDetail.jsx";
 import DocumentProcessing from "./pages/DocumentProcessing.jsx";
 import DocumentDetail from "./pages/DocumentDetail.jsx";
+
 
 function Header() {
   const location = useLocation();
@@ -56,11 +59,14 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/" element={<ProtectedRoute><ProjectsView /></ProtectedRoute>} />
             <Route path="/projects/:projectId" element={<ProtectedRoute><ProjectDetail /></ProtectedRoute>} />
             <Route path="/documents/:documentId/processing" element={<ProtectedRoute><DocumentProcessing /></ProtectedRoute>} />
             <Route path="/documents/:documentId" element={<ProtectedRoute><DocumentDetail /></ProtectedRoute>} />
           </Routes>
+
         </main>
       </div>
     </AuthProvider>
