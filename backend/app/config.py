@@ -1,4 +1,5 @@
 import os
+import json
 class Settings:
     # Core
     ENV: str = os.getenv("ENV", "development")
@@ -31,6 +32,14 @@ class Settings:
     MAX_TERMINATION_NOTICE_DAYS_LOW: int = int(os.getenv("MIN_TERMINATION_NOTICE_DAYS", "15"))
     MAX_PAYMENT_TERMS_DAYS: int = int(os.getenv("MAX_PAYMENT_TERMS_DAYS", "90"))
     YOY_CHANGE_THRESHOLD_PCT: float = float(os.getenv("YOY_CHANGE_THRESHOLD_PCT", "35.0"))
+    # Configurable financial "normal" ranges used by Stage 3. The JSON shape is
+    # {"ratio_name": [minimum, maximum]}. This keeps industry assumptions out
+    # of the code and lets a deployment tune them without rebuilding.
+    INDUSTRY_RATIO_RANGES: dict = json.loads(os.getenv(
+        "INDUSTRY_RATIO_RANGES_JSON",
+        '{"debt_to_assets":[0.0,0.85],"net_margin":[-0.25,0.50]}'
+    ))
+
 
     # CRM sync
     CRM_PROVIDER: str = os.getenv("CRM_PROVIDER", "notion")  # "notion" | "airtable"
@@ -47,6 +56,7 @@ class Settings:
 
     # CORS 
     FRONTEND_ORIGIN: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    PUBLIC_APP_URL: str = os.getenv("PUBLIC_APP_URL", FRONTEND_ORIGIN)
 
 
 settings = Settings()
