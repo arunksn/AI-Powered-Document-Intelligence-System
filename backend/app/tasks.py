@@ -120,6 +120,16 @@ def process_document_task(self, document_id: str):
         _set_stage(db, document_id, 2, "active")
         stage2 = extraction.run_stage2(document.document_type, raw_text, tables)
         document.extracted_entities = stage2
+        # Invoice vendors are first-class counterparties. Keep the vendor in
+        # the document's primary-party field as well as the type-specific
+        # extraction so CRM records and cross-document matching remain useful
+        # even when the lightweight NER model misses the vendor name.
+        if document.document_type == "invoice":
+            vendor = stage2.get("vendor")
+            parties = list(document.primary_parties or [])
+            if vendor and vendor not in parties:
+                parties.append(vendor)
+            document.primary_parties = parties[:8]
         document.current_stage = 2
         db.commit()
         _set_stage(db, document_id, 2, "complete", stage2)
@@ -143,11 +153,31 @@ def process_document_task(self, document_id: str):
         db.commit()
         _set_stage(db, document_id, 4, "complete", stage4)
 
+        # --- Stage 5: project-level contradiction detection ---
+        # If this is currently the only completed document, explicitly mark
+        # the stage as skipped. A later upload will replace it with an active
+        # Stage 5 result once the project has at least two completed documents.
+        completed_count = (
+            db.query(Document)
+            .filter(Document.project_id == document.project_id, Document.status == ProcessingStatus.complete)
+            .count()
+        )
+        if completed_count < 2:
+            _set_stage(db, document_id, 5, "skipped", {
+                "skipped": True,
+                "reason": "Cross-document checks require at least two completed documents in the project.",
+            })
+        else:
+            run_contradiction_detection_task.delay(document.project_id)
+
+        document.current_stage = 5
         document.status = ProcessingStatus.complete
         db.commit()
         publish_stage_update(document_id, {"type": "status", "status": "complete"})
 
-        # --- Stage 5: only meaningful across the whole project ---
+        # A second document may have been uploaded while this task was
+        # finishing; ensure the project-level check is queued for every
+        # completed-document transition.
         run_contradiction_detection_task.delay(document.project_id)
 
         # --- CRM sync, fire-and-forget-ish (own task so a CRM outage
@@ -186,6 +216,9 @@ def run_contradiction_detection_task(project_id: str):
             }
             for d in docs
         ]
+        for d in docs:
+            _set_stage(db, d.id, 5, "active")
+
         found = contradiction_detection.find_contradictions(doc_dicts)
 
         db.query(Contradiction).filter_by(project_id=project_id).delete()
@@ -193,7 +226,13 @@ def run_contradiction_detection_task(project_id: str):
             db.add(Contradiction(project_id=project_id, **c))
         db.commit()
 
+        stage5_output = {
+            "contradiction_count": len(found),
+            "project_id": project_id,
+            "documents_compared": len(docs),
+        }
         for doc_id in {d.id for d in docs}:
+            _set_stage(db, doc_id, 5, "complete", stage5_output)
             publish_stage_update(doc_id, {
                 "type": "contradictions_updated",
                 "project_id": project_id,
@@ -224,10 +263,19 @@ def sync_document_to_crm_task(self, document_id: str):
             sync_row.status = "synced"
             sync_row.last_error = None
             sync_row.last_synced_at = utcnow()
+        except ValueError as exc:
+            sync_row.status = "failed"
+            sync_row.last_error = str(exc)
+            db.commit()
+            publish_stage_update(document_id, {"type": "crm_sync_update", "status": sync_row.status})
+            return
         except Exception as exc:  # noqa: BLE001
             sync_row.status = "failed"
             sync_row.last_error = str(exc)
             db.commit()
+            publish_stage_update(document_id, {"type": "crm_sync_update", "status": sync_row.status})
+            if self.request.retries >= self.max_retries:
+                return
             raise self.retry(exc=exc)
         db.commit()
         publish_stage_update(document_id, {"type": "crm_sync_update", "status": sync_row.status})

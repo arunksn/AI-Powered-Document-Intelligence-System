@@ -7,7 +7,7 @@ from the anomalies found in Stage 3 weighted by severity.
 SEVERITY_WEIGHTS = {"critical": 30, "warning": 12, "informational": 3}
 
 CATEGORY_GROUPS = {
-    "financial": {"amount_mismatch", "past_due_date", "liabilities_exceed_assets", "net_income_exceeds_revenue", "yoy_change"},
+    "financial": {"amount_mismatch", "past_due_date", "liabilities_exceed_assets", "net_income_exceeds_revenue", "yoy_change", "industry_ratio_out_of_range"},
     "contractual": {"termination_notice", "payment_terms", "liability_asymmetry", "missing_clause"},
     "data_quality": {"duplicate_line_item"},
 }

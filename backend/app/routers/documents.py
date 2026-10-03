@@ -1,5 +1,6 @@
 import os
 import uuid
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
@@ -13,7 +14,17 @@ from app.pipeline.ingestion import detect_format
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-ALLOWED_EXTENSIONS = {"pdf", "docx", "xlsx", "xls", "jpg", "jpeg", "png"}
+ALLOWED_EXTENSIONS = {"pdf", "docx", "xlsx", "jpg", "jpeg", "png"}
+
+
+def _dispatch_processing_task(doc_id: str):
+    try:
+        process_document_task.delay(doc_id)
+    except Exception:
+        # Fallback to direct background thread if Celery broker is unavailable
+        threading.Thread(target=lambda: process_document_task.apply(args=[doc_id]), daemon=True).start()
+
+
 
 
 def _get_owned_document(document_id: str, current_user: models.User, db: Session) -> models.Document:
@@ -71,9 +82,10 @@ async def upload_document(
     db.commit()
     db.refresh(document)
 
-    process_document_task.delay(document.id)
+    _dispatch_processing_task(document.id)
 
     return document
+
 
 
 @router.get("/{document_id}", response_model=schemas.DocumentOut)
@@ -155,8 +167,9 @@ def reprocess_document(
     document.status = models.ProcessingStatus.queued
     document.current_stage = 0
     db.commit()
-    process_document_task.delay(document_id)
+    _dispatch_processing_task(document_id)
     return {"queued": True}
+
 
 
 @router.delete("/{document_id}")

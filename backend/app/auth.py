@@ -7,6 +7,7 @@ a single long-lived access token issued at login/signup, sent as a
 Bearer token on every request. That's the right amount of complexity for
 an internal tool used by a project team, not a public-facing consumer app.
 """
+import re
 from datetime import timedelta
 from app.utils import utcnow
 
@@ -21,6 +22,23 @@ from app.database import get_db
 from app import models
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def validate_password_strength(password: str) -> None:
+    if len(password) < 8:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password must be at least 8 characters long.")
+    if not re.search(r"[A-Z]", password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password must contain at least one uppercase letter (A-Z).")
+    if not re.search(r"[a-z]", password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password must contain at least one lowercase letter (a-z).")
+    if not re.search(r"[0-9]", password):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password must contain at least one numerical digit (0-9).")
+    if not re.search(r"[!?@#$%^&*()_+\-=\[\]{};':\"\\|,.<>\/?~#]", password):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Password must contain at least one special character (e.g. ?, #, /, @, !, $)."
+        )
+
 
 
 def hash_password(password: str) -> str:
@@ -40,7 +58,26 @@ def create_access_token(user_id: str) -> str:
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
+def create_reset_token(user_id: str) -> str:
+    expire = utcnow() + timedelta(minutes=15)
+    payload = {"sub": user_id, "scope": "password_reset", "exp": expire}
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_reset_token(token: str) -> str:
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        if payload.get("scope") != "password_reset":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid password reset token.")
+        return payload["sub"]
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password reset link has expired. Please request a new one.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired password reset link.")
+
+
 def decode_access_token(token: str) -> str:
+
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         return payload["sub"]

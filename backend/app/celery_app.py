@@ -24,4 +24,6 @@ celery_app.conf.update(
     worker_concurrency=int(__import__("os").getenv("CELERY_CONCURRENCY", "2")),
 )
 
-# come back and need to check celery - docintel
+import celery.app.trace
+celery.app.trace.setup_worker_optimizations = lambda *args, **kwargs: None
+celery.app.trace.reset_worker_optimizations(celery_app)
