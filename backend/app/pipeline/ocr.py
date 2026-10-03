@@ -120,11 +120,53 @@ def _ocr_single_image_array(img_array) -> dict:
 
 
 def run_ocr_on_image(filepath: str) -> dict:
+    from PIL import Image
+    import numpy as np
     import cv2
+    import fitz
 
-    img = cv2.imread(filepath)
+    img = None
+    # Strategy 1: PIL Image.open
+    try:
+        with Image.open(filepath) as pil_img:
+            pil_img = pil_img.convert("RGB")
+            img = np.array(pil_img)
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    except Exception:
+        pass
+
+    # Strategy 2: OpenCV imdecode with np.fromfile (handles raw bytes & non-ASCII paths)
     if img is None:
-        raise ValueError(f"Could not read image at {filepath}")
+        try:
+            img_data = np.fromfile(filepath, dtype=np.uint8)
+            decoded = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+            if decoded is not None and decoded.size > 0:
+                img = decoded
+        except Exception:
+            pass
+
+    # Strategy 3: PyMuPDF fitz (handles rasterized images, TIFFs, etc.)
+    if img is None:
+        try:
+            doc = fitz.open(filepath)
+            if len(doc) > 0:
+                pix = doc[0].get_pixmap(dpi=300)
+                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+                if pix.n == 4:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+                elif pix.n == 1:
+                    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                else:
+                    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            doc.close()
+        except Exception:
+            pass
+
+    # Fallback if image file is completely unreadable/empty
+    if img is None:
+        logger.warning(f"Could not decode image at {filepath} with any decoder.")
+        return {"text": "(No readable text extracted from image)", "confidence": 0.0}
+
     result = _ocr_single_image_array(img)
     result["text"] = _postprocess(result["text"])
     return result
