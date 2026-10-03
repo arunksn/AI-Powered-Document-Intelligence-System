@@ -1,11 +1,12 @@
 # Ledgerline — Document Intelligence Platform
 
-Upload contracts, invoices, financial statements, RFPs, and NDAs in any
-common format. A five-stage pipeline classifies each document, extracts
-its structured content, flags anomalies, scores risk, and cross-checks it
-against every other document in the same project — streaming results to
-the browser stage by stage over a WebSocket, then syncing a summary
-record to Notion or Airtable.
+Ledgerline is a production-oriented web application for intelligent document
+processing and contract intelligence. Users create projects, upload PDF, DOCX,
+XLSX, JPG, or PNG documents, and watch a CPU-bound pipeline process them in
+real time. The pipeline preserves document structure, performs OCR when needed,
+classifies document types, extracts entities and named clauses, detects anomalies,
+computes risk, checks contradictions across related documents, and syncs a
+structured record to Notion or Airtable.
 
 ## Architecture
 
@@ -22,7 +23,7 @@ record to Notion or Airtable.
                         └──────┬──────┘
                                │
                     ┌──────────┴───────────┐
-                    │  5-stage pipeline     │
+                    │  6-stage pipeline     │
                     │  0 Ingestion/OCR      │
                     │  1 Classification     │
                     │  2 Extraction         │
@@ -168,12 +169,16 @@ This repo deploys as **three Railway services** from the same GitHub repo:
    `VITE_API_URL` / `VITE_WS_URL` to the deployed **web** service's public
    URL (use `wss://` for the WebSocket URL once Railway terminates TLS).
 
+For the Railway free-tier worker, keep `CELERY_CONCURRENCY=1` so the
+model-memory budget applies to one active CPU inference process at a time.
+
 Set `NOTION_API_KEY` + `NOTION_DATABASE_ID` (or the Airtable equivalents)
 as environment variables on the **web** and **worker** services — CRM
 sync runs from the worker, and manual retries are triggered from the web
 API.
 
-The Notion database (or Airtable table) needs these properties/fields:
+Set `PUBLIC_APP_URL` to the deployed frontend origin so CRM records contain a
+real clickable link back to the document detail page. The Notion database (or Airtable table) needs these properties/fields:
 `Name` (title/text), `ContentHash` (text), `DocumentType` (select/text),
 `Project` (text), `PrimaryParties` (text), `RiskScore` (number),
 `CriticalAnomalies` / `WarningAnomalies` / `InfoAnomalies` (number),
