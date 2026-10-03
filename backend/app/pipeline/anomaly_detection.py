@@ -138,6 +138,31 @@ def detect_financial_statement_anomalies(extraction: dict, prior_period_metrics:
             {"revenue": revenue, "net_income": net_income},
         ))
 
+    # Configurable industry-style ratio checks. These are deliberately
+    # deployment-configured rather than hard-coded to one industry.
+    ranges = settings.INDUSTRY_RATIO_RANGES or {}
+    if assets and liabilities is not None and assets != 0 and "debt_to_assets" in ranges:
+        ratio = liabilities / assets
+        lo, hi = ranges["debt_to_assets"]
+        if ratio < lo or ratio > hi:
+            anomalies.append(_mk(
+                "warning", "industry_ratio_out_of_range",
+                f"Debt-to-assets ratio is {ratio:.2f}, outside the configured normal range "
+                f"of {lo:.2f}–{hi:.2f}.",
+                {"ratio": round(ratio, 3), "range": [lo, hi], "metric": "debt_to_assets"},
+            ))
+
+    if revenue and net_income is not None and "net_margin" in ranges:
+        margin = net_income / revenue
+        lo, hi = ranges["net_margin"]
+        if margin < lo or margin > hi:
+            anomalies.append(_mk(
+                "warning", "industry_ratio_out_of_range",
+                f"Net margin is {margin:.1%}, outside the configured normal range "
+                f"of {lo:.1%}–{hi:.1%}.",
+                {"ratio": round(margin, 4), "range": [lo, hi], "metric": "net_margin"},
+            ))
+
     if prior_period_metrics:
         for key, current_value in metrics.items():
             prior_value = prior_period_metrics.get(key)
