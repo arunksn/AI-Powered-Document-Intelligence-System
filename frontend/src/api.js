@@ -31,12 +31,22 @@ async function request(path, options = {}) {
     },
     ...options,
   });
-  if (res.status === 401) {
+  const isAuthRoute = path.startsWith("/api/auth/");
+  if (res.status === 401 && !isAuthRoute) {
     unauthorizedListeners.forEach((fn) => fn());
   }
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
+    const text = await res.text();
+    let cleanMessage = text;
+    try {
+      const json = JSON.parse(text);
+      if (json && json.detail) {
+        cleanMessage = typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
+      }
+    } catch {
+      // fallback to raw text
+    }
+    throw new Error(cleanMessage);
   }
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res.text();
@@ -47,8 +57,13 @@ export const authApi = {
     request("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password, name }) }),
   login: (email, password) =>
     request("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  forgotPassword: (email) =>
+    request("/api/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
+  resetPassword: (token, new_password) =>
+    request("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ token, new_password }) }),
   me: () => request("/api/auth/me"),
 };
+
 
 export const api = {
   listProjects: () => request("/api/projects"),
@@ -69,9 +84,20 @@ export const api = {
       body: form,
     });
     if (res.status === 401) unauthorizedListeners.forEach((fn) => fn());
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const text = await res.text();
+      let cleanMessage = text;
+      try {
+        const json = JSON.parse(text);
+        if (json && json.detail) {
+          cleanMessage = typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
+        }
+      } catch {}
+      throw new Error(cleanMessage);
+    }
     return res.json();
   },
+
 
   getDocument: (id) => request(`/api/documents/${id}`),
   getDocumentStages: (id) => request(`/api/documents/${id}/stages`),
