@@ -1,4 +1,4 @@
-from app.pipeline import risk_scoring, contradiction_detection
+from app.pipeline import risk_scoring, contradiction_detection, anomaly_detection
 
 
 def test_no_anomalies_gives_zero_risk():
@@ -84,3 +84,22 @@ def test_no_payment_terms_contradiction_without_shared_party():
 def test_single_document_produces_no_contradictions():
     docs = [{"id": "c1", "document_type": "contract", "extracted_entities": {}, "primary_parties": []}]
     assert contradiction_detection.find_contradictions(docs) == []
+
+
+def test_invoice_vendor_matches_contract_party_for_payment_term_contradiction():
+    docs = [
+        {"id": "c1", "document_type": "contract",
+         "extracted_entities": {"clauses": {"payment_terms": {"days": 30}}},
+         "primary_parties": ["Acme Manufacturing Inc."]},
+        {"id": "i1", "document_type": "invoice",
+         "extracted_entities": {"payment_terms_days": 60, "vendor": "Acme Manufacturing"},
+         "primary_parties": []},
+    ]
+    contradictions = contradiction_detection.find_contradictions(docs)
+    assert any(c["field"] == "payment_terms_days" for c in contradictions)
+
+
+def test_financial_ratio_outside_configured_range_is_flagged():
+    extraction = {"metrics": {"revenue": 1000, "net_income": 100, "total_assets": 1000, "total_liabilities": 900}}
+    anomalies = anomaly_detection.detect_financial_statement_anomalies(extraction)
+    assert any(a["category"] == "industry_ratio_out_of_range" for a in anomalies)

@@ -88,3 +88,10 @@ def test_financial_statement_metric_extraction():
     assert result["metrics"]["net_income"] == 310000
     assert result["metrics"]["total_assets"] == 1800000
     assert result["metrics"]["total_liabilities"] == 2100000
+
+
+def test_named_clause_inventory_includes_common_contract_sections():
+    text = """Governing Law: Delaware. Arbitration applies. Seller shall indemnify Buyer.
+    The parties shall maintain insurance. This agreement renews automatically for one year."""
+    result = extraction.extract_contract_or_nda(text)
+    assert {"governing_law", "dispute_resolution", "indemnification", "insurance", "renewal"}.issubset(set(result["named_clauses_detected"]))
