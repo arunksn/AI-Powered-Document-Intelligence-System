@@ -1,5 +1,9 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-export const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
+// Browser requests use the public routes on the current deployment.
+// Service bindings are private runtime URLs and cannot be used by a Vite bundle.
+const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+const socketOrigin = new URL(API_URL || window.location.origin);
+socketOrigin.protocol = socketOrigin.protocol === "https:" ? "wss:" : "ws:";
+export const WS_URL = (import.meta.env.VITE_WS_URL || socketOrigin.origin).replace(/\/+$/, "");
 
 const TOKEN_KEY = "docintel_token";
 

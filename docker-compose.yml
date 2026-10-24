@@ -17,6 +17,7 @@ services:
 
   web:
     build: ./backend
+    env_file: .env
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./backend:/app
@@ -30,7 +31,8 @@ services:
 
   worker:
     build: ./backend
-    command: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=2
+    env_file: .env
+    command: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-1}
     volumes:
       - ./backend:/app
     environment:
@@ -41,14 +43,14 @@ services:
 
   frontend:
     build: ./frontend
+    env_file: .env
     command: npm run dev -- --host 0.0.0.0
     volumes:
       - ./frontend:/app
       - /app/node_modules
     ports: ["5173:5173"]
     environment:
-      VITE_API_URL: http://localhost:8000
-      VITE_WS_URL: ws://localhost:8000
+      API_PROXY_TARGET: http://web:8000
     depends_on: [web]
 
 volumes:

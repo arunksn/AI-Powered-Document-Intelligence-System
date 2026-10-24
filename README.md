@@ -153,12 +153,14 @@ docker-compose.yml   local dev: postgres + redis + web + worker + frontend
 ## Local development
 
 ```bash
-cp backend/.env.example backend/.env
+cp .env.example .env
 docker compose up --build
 ```
 
 - Frontend: http://localhost:5173
 - API: http://localhost:8000/api/health
+- The root `.env` is shared by the backend, worker, and frontend. Vite exposes
+  only `VITE_` variables to the browser; keep secrets in unprefixed variables.
 - The first `docker compose up` will download the spaCy `en_core_web_sm`
   model during the backend image build (a few hundred MB) — expect the
   first build to take a couple of minutes.
@@ -166,6 +168,12 @@ docker compose up --build
 Without Docker:
 
 ```bash
+# From the repository root, export the shared configuration for both processes.
+cp .env.example .env
+set -a
+source .env
+set +a
+
 # backend
 cd backend
 python -m venv venv && source venv/bin/activate
@@ -176,10 +184,77 @@ uvicorn app.main:app --reload &
 celery -A app.celery_app.celery_app worker --loglevel=info &
 
 # frontend
-cd frontend
+cd ../frontend
 npm install
 npm run dev
 ```
+
+## Deploying to Vercel
+
+Import the repository as **one project**, with the project Root Directory set
+to the repository root. The root `vercel.json` defines two independently built
+services and one background daemon:
+
+| Name | Source | Public routing |
+| --- | --- | --- |
+| `backend` | `backend/`, FastAPI entrypoint `app.main:app` | `/api/:path*` and `/ws/:path*` |
+| `frontend` | `frontend/`, Vite build in `dist/` | All remaining paths, with an SPA fallback for React Router |
+| `worker` (daemon) | `backend/Dockerfile`, Celery with concurrency 1 | None; consumes jobs from external Redis |
+
+The backend receives the original `/api/...` or `/ws/...` path, matching its
+existing routes. The browser uses the current origin for both HTTP and
+WebSockets (`wss://` when the page uses HTTPS). Leave `VITE_API_URL` and
+`VITE_WS_URL` unset for this deployment. The Python service is pinned to 3.12
+for compatibility with the existing dependency versions.
+
+There are **no service bindings**: the Vite frontend runs in the browser,
+and the backend and daemon communicate through Redis and the database, not
+through HTTP calls to one another. Private binding URLs cannot be embedded
+in a Vite build, and daemons cannot receive inbound service calls. If a
+server-side HTTP caller is introduced later, declare its binding on that
+calling service and read the generated URL inside its runtime function.
+
+Configure these project environment variables before deploying:
+
+| Variable | Value |
+| --- | --- |
+| `ENV` | `production` |
+| `JWT_SECRET` and `SECRET_KEY` | Strong random secrets |
+| `DATABASE_URL` | External PostgreSQL SQLAlchemy connection URL, shared by backend and worker; do not use the local SQLite default |
+| `REDIS_URL` | External Redis connection URL for Celery and pub/sub, shared by backend and worker; use a service that supports those protocols |
+| `FRONTEND_ORIGIN` | Public frontend origin, e.g. `https://your-project.vercel.app` |
+| `PUBLIC_APP_URL` | Public frontend origin for CRM links |
+| CRM variables | Notion or Airtable credentials from the root `.env.example`, if CRM sync is enabled |
+
+The worker image installs Tesseract and the spaCy model during its Docker
+build. Its initial placement is **one instance in `iad1`**, using the default
+2 GiB memory, with concurrency 1 and a 300-second graceful shutdown period.
+Choose a region close to your external PostgreSQL and Redis services. Uploaded
+originals are persisted in PostgreSQL and restored to the worker's temporary
+directory, so backend and worker do not need a shared filesystem. Keep the
+broker available: the API's existing thread fallback is unsuitable for
+serverless background processing.
+
+[Vercel Daemons](https://vercel.com/docs/daemons) currently run only in
+production and are not started by `vercel dev`. Give Preview deployments
+separate database and Redis resources; to process documents there, run a
+worker locally against those Preview resources. Do not connect a Preview
+backend to the production worker's Redis broker or database.
+
+For local integration testing, install the frontend and backend dependencies,
+start PostgreSQL and Redis, export the backend variables from
+root `.env.example`, and run `vercel dev` **from the repository root**.
+Run the worker separately against the same local database and Redis:
+
+```bash
+cd backend
+celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=1
+```
+
+The worker needs Tesseract and the spaCy model installed locally; alternatively,
+use `docker compose up --build` for the complete local stack. Plain `npm run dev`
+also proxies `/api` and `/ws` to `localhost:8000`; Docker Compose sets the
+development proxy target to `http://web:8000`.
 
 ## Deploying to Railway
 
@@ -417,7 +492,7 @@ what's a known next step:
 
 ## Configurable anomaly thresholds
 
-Set via environment variables (see `backend/.env.example`):
+Set via environment variables (see the root `.env.example`):
 `MIN_TERMINATION_NOTICE_DAYS`, `MAX_PAYMENT_TERMS_DAYS`,
 `YOY_CHANGE_THRESHOLD_PCT`, `OCR_CONFIDENCE_THRESHOLD`.
 
