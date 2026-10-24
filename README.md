@@ -8,6 +8,8 @@ classifies document types, extracts entities and named clauses, detects anomalie
 computes risk, checks contradictions across related documents, and syncs a
 structured record to Notion or Airtable.
 
+**Live app:** _add the Railway URL here after deploying_
+
 ## Architecture
 
 ```
@@ -85,12 +87,38 @@ Net effect: steady-state memory stays bounded to "one small model +
 FastAPI/Celery overhead" regardless of how many documents have been
 processed in the container's lifetime.
 
-**Storage note:** Railway's free tier filesystem is ephemeral. Uploaded
-originals live only in `UPLOAD_DIR` (`/tmp` by default) long enough for
-the pipeline to run; the extracted structured data — the part that
-matters — is persisted to Postgres/SQLite. If a document needs
-reprocessing after a container restart, it must be re-uploaded (the UI
-surfaces this with a clear error rather than failing silently).
+**Storage note:** Railway's free-tier filesystem is ephemeral, and the
+web and worker services don't share a disk. The original upload bytes are
+therefore stored in the `document_files` table. The web service also writes
+a copy to `UPLOAD_DIR` (`/tmp` by default), and the worker uses that copy
+when it can see it. When it can't, which is the case on Railway or in
+docker-compose, the worker restores the file from the database into its own
+`UPLOAD_DIR`. Reprocessing therefore keeps working after a container
+restart, and deleting a document deletes its stored bytes.
+
+## Models used, sizes and memory
+
+Peak RSS was measured in a clean Python 3.11 process (macOS, `ru_maxrss`).
+Linux containers come in at roughly the same figures.
+
+| Component | Used in | On-disk size | Resident memory | Loading |
+|---|---|---|---|---|
+| Parsers + OpenCV + NumPy (PyMuPDF, python-docx, openpyxl) | Stage 0 | ~80 MB of wheels | ~100 MB baseline for the worker process | Imported once |
+| spaCy `en_core_web_sm` 3.7 (NER) | Stage 1 parties/dates | 15 MB | **+~100 MB** when loaded | Lazy through `model_manager`; unloaded after 120s idle |
+| Tesseract 5 (`eng` traineddata) | Stage 0 OCR | ~25 MB | ~50–150 MB per page, **in a separate OS process** | Spawned per page, exits afterwards |
+| Rule-based classifier, regex extractors, anomaly rules, risk scorer | Stages 1–5 | — | negligible | — |
+
+Peak worker memory is about 200 MB while NER runs, plus one short-lived
+Tesseract process during OCR. That fits inside the 512 MB Railway service
+with headroom, and it holds for any number of documents because
+`MAX_CONCURRENT_MODELS=1` and the worker runs one task at a time.
+
+## Test document set
+
+[`sample_documents/`](sample_documents/) holds one example of every input
+format (digital PDF, scanned PDF, DOCX, XLSX, JPG, PNG, and a deliberately
+degraded scan), with planted anomalies and three cross-document
+contradiction cases. Its README lists the expected results for each file.
 
 ## Repo layout
 
@@ -392,6 +420,26 @@ what's a known next step:
 Set via environment variables (see `backend/.env.example`):
 `MIN_TERMINATION_NOTICE_DAYS`, `MAX_PAYMENT_TERMS_DAYS`,
 `YOY_CHANGE_THRESHOLD_PCT`, `OCR_CONFIDENCE_THRESHOLD`.
+
+## Known limitations by document type
+
+- **Contracts / NDAs / RFPs**: clauses are found by keyword and regex.
+  - A clause that uses unusual wording is reported as "missing" (informational), not missed silently.
+  - The liability-asymmetry check compares the first two dollar amounts in the clause, so it does not know which party each cap belongs to.
+  - Only the first occurrence of each clause is used.
+- **Invoices**:
+  - Line items are extracted only from real tables (digital PDF, DOCX, XLSX). For scanned or photographed invoices you get the total, tax, due date, vendor and terms, but no line items.
+  - The total regex takes the first "Total" figure, so an invoice that prints "Subtotal" before "Total" can be misread.
+  - Due dates are parsed with `dateutil`, so ambiguous formats like 03/04 are read month-first.
+- **Financial statements**:
+  - Covers 7 named metrics: revenue, net income, total assets, total liabilities, operating expenses, gross profit and cash flow. Other line items are ignored.
+  - The year-over-year check uses a comparative column on the same line when there is one. Otherwise it falls back to the most recently uploaded other statement in the same project, which may not be the immediately preceding period.
+  - Ratio ranges are generic defaults and should be set per industry through `INDUSTRY_RATIO_RANGES_JSON`.
+- **Scanned PDFs / images**:
+  - Quality depends on Tesseract. Scans that are very blurred or rotated more than about 10° are flagged as low quality rather than corrected.
+  - Handwriting is not supported.
+- **XLSX**: a sheet is treated as data when at least 15% of its cells are numeric. A sheet that is mostly text but still tabular (for example a clause register) is treated as metadata.
+- **All types**: English only. Parties come from the small spaCy model, so they can include noise such as section headings tagged as organisations.
 
 ## Known scope boundaries / next steps
 

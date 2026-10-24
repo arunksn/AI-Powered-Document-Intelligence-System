@@ -10,6 +10,15 @@ const STATUS_STYLE = {
   failed: "text-critical bg-critical/10 border-critical/30",
 };
 
+const STATUS_LABEL = {
+  queued: "Waiting",
+  processing: "Processing",
+  complete: "Complete",
+  failed: "Failed",
+};
+
+const ACCEPTED_EXTENSIONS = /\.(pdf|docx|xlsx|jpe?g|png)$/i;
+
 export default function ProjectDetail() {
   const { projectId } = useParams();
   const [project, setProject] = useState(null);
@@ -17,6 +26,8 @@ export default function ProjectDetail() {
   const [contradictions, setContradictions] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [uploadErrors, setUploadErrors] = useState([]);
+  const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -43,14 +54,29 @@ export default function ProjectDetail() {
   }, [documents, load]);
 
   const handleFiles = async (files) => {
+    if (files.length === 0) return;
     setUploading(true);
-    try {
-      for (const file of files) {
-        await api.uploadDocument(projectId, file);
+    setUploadErrors([]);
+    const errors = [];
+    // Upload one at a time and keep going past a failure, so one bad file
+    // (wrong format, too large) doesn't silently block the rest.
+    for (const file of files) {
+      if (!ACCEPTED_EXTENSIONS.test(file.name)) {
+        errors.push(`${file.name}: unsupported file type. Use PDF, DOCX, XLSX, JPG or PNG.`);
+        continue;
       }
+      try {
+        await api.uploadDocument(projectId, file);
+      } catch (err) {
+        errors.push(`${file.name}: ${err.message || "upload failed"}`);
+      }
+    }
+    setUploadErrors(errors);
+    try {
       await load();
     } finally {
       setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";  // allow re-selecting the same file
     }
   };
 
@@ -82,11 +108,13 @@ export default function ProjectDetail() {
       {project.description && <p className="text-inkfaint text-sm mt-1">{project.description}</p>}
 
       <div
-        className="mt-6 border-2 border-dashed border-hairline rounded-md p-8 text-center bg-surface"
-        onDragOver={(e) => e.preventDefault()}
+        className={`mt-6 border-2 border-dashed rounded-md p-8 text-center bg-surface transition ${dragging ? "border-ledger bg-ledger/5" : "border-hairline"}`}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
         onDrop={(e) => {
           e.preventDefault();
-          handleFiles(Array.from(e.dataTransfer.files));
+          setDragging(false);
+          if (!uploading) handleFiles(Array.from(e.dataTransfer.files));
         }}
       >
         <p className="text-sm text-inkfaint mb-3">
@@ -109,6 +137,15 @@ export default function ProjectDetail() {
         />
       </div>
 
+      {uploadErrors.length > 0 && (
+        <div role="alert" className="mt-3 border border-critical/30 bg-critical/5 rounded-md p-3 text-sm text-critical">
+          <p className="font-semibold">Some files couldn't be uploaded:</p>
+          <ul className="list-disc ml-5 mt-1">
+            {uploadErrors.map((e) => <li key={e}>{e}</li>)}
+          </ul>
+        </div>
+      )}
+
       <h2 className="font-display text-xl text-ink mt-10 mb-3">Documents</h2>
       {documents.length === 0 ? (
         <p className="text-sm text-inkfaint">No documents uploaded yet.</p>
@@ -117,13 +154,13 @@ export default function ProjectDetail() {
           {documents.map((d) => (
             <div
               key={d.id}
-              className="flex items-center justify-between border border-hairline rounded-md p-3 bg-surface hover:border-ledger transition"
+              className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border border-hairline rounded-md p-3 bg-surface hover:border-ledger transition"
             >
               <Link
                 to={d.status === "complete" ? `/documents/${d.id}` : `/documents/${d.id}/processing`}
                 className="flex-1 min-w-0"
               >
-                <span className="font-body text-sm text-ink">{d.filename}</span>
+                <span className="font-body text-sm text-ink break-all">{d.filename}</span>
                 {d.document_type && (
                   <span className="ml-2 font-mono text-xs text-inkfaint uppercase">{d.document_type.replace(/_/g, " ")}</span>
                 )}
@@ -136,7 +173,7 @@ export default function ProjectDetail() {
                   <span className="font-mono text-xs text-inkfaint">risk {Math.round(d.risk_score)}</span>
                 )}
                 <span className={`px-2 py-0.5 rounded border text-xs font-mono uppercase tracking-wide ${STATUS_STYLE[d.status]}`}>
-                  {d.status}
+                  {STATUS_LABEL[d.status] || d.status}
                 </span>
                 <button
                   onClick={(e) => handleDelete(e, d)}

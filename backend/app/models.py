@@ -2,7 +2,7 @@ import uuid
 import enum
 from app.utils import utcnow
 from sqlalchemy import (
-    Column, String, Integer, Float, Text, DateTime, ForeignKey, JSON, Enum, Boolean
+    Column, String, Integer, Float, Text, DateTime, ForeignKey, JSON, Enum, Boolean, LargeBinary
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -95,6 +95,7 @@ class Document(Base):
     anomalies = relationship("Anomaly", back_populates="document", cascade="all, delete-orphan")
     stage_results = relationship("PipelineStageResult", back_populates="document", cascade="all, delete-orphan")
     crm_sync = relationship("CrmSyncRecord", back_populates="document", uselist=False, cascade="all, delete-orphan")
+    original_file = relationship("DocumentFile", uselist=False, cascade="all, delete-orphan")
 
 
 class PipelineStageResult(Base):
@@ -156,3 +157,15 @@ class CrmSyncRecord(Base):
     last_synced_at = Column(DateTime, nullable=True)
 
     document = relationship("Document", back_populates="crm_sync")
+
+
+class DocumentFile(Base):
+    """Original upload bytes. The web and worker run as separate services on
+    Railway (and separate containers in docker-compose), so a file written
+    to the web service's local disk is invisible to the worker; the worker
+    restores it from here instead. Also makes reprocessing survive restarts
+    of the ephemeral filesystem."""
+    __tablename__ = "document_files"
+
+    document_id = Column(String, ForeignKey("documents.id"), primary_key=True)
+    data = Column(LargeBinary, nullable=False)

@@ -9,6 +9,7 @@ mark complete -> publish WS update. This is what lets the frontend show
 each stage's spinner-then-checkmark-then-output-panel in real time.
 """
 import hashlib
+import os
 import logging
 import traceback
 from app.utils import utcnow
@@ -17,7 +18,7 @@ from app.celery_app import celery_app
 from app.database import SessionLocal
 from app.models import (
     Document, Project, PipelineStageResult, Anomaly, Contradiction,
-    CrmSyncRecord, ProcessingStatus,
+    CrmSyncRecord, ProcessingStatus, DocumentFile,
 )
 from app.websocket_manager import publish_stage_update
 from app.pipeline import ingestion, classification, extraction, anomaly_detection, risk_scoring
@@ -67,6 +68,21 @@ def _set_stage(db, document_id: str, stage_number: int, status: str, output: dic
     })
 
 
+def _ensure_local_file(db, document) -> str:
+    """Returns a readable local path for the original upload, restoring it
+    from the database when this process can't see the web service's disk."""
+    if document.filepath and os.path.exists(document.filepath):
+        return document.filepath
+    stored = db.get(DocumentFile, document.id)
+    if stored is None:
+        raise FileNotFoundError("Original file is no longer available -- please re-upload it.")
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    path = os.path.join(settings.UPLOAD_DIR, f"{document.id}_{os.path.basename(document.filename)}")
+    with open(path, "wb") as f:
+        f.write(stored.data)
+    return path
+
+
 @celery_app.task(bind=True, max_retries=1)
 def process_document_task(self, document_id: str):
     db = SessionLocal()
@@ -82,7 +98,7 @@ def process_document_task(self, document_id: str):
 
         # --- Stage 0: Ingestion & Normalisation ---
         _set_stage(db, document_id, 0, "active")
-        normalized = ingestion.normalize_document(document.filepath, document.filename)
+        normalized = ingestion.normalize_document(_ensure_local_file(db, document), document.filename)
 
         document.is_scanned = normalized["is_scanned"]
         document.ocr_confidence = normalized["ocr_confidence"]
@@ -136,7 +152,24 @@ def process_document_task(self, document_id: str):
 
         # --- Stage 3: Anomaly Detection ---
         _set_stage(db, document_id, 3, "active")
-        anomalies = anomaly_detection.run_stage3(document.document_type, stage2)
+        prior_metrics = None
+        if document.document_type == "financial_statement":
+            # Fallback for the YoY check when the statement has no comparative
+            # column: the most recent other completed statement in the project.
+            prior_doc = (
+                db.query(Document)
+                .filter(
+                    Document.project_id == document.project_id,
+                    Document.id != document_id,
+                    Document.document_type == "financial_statement",
+                    Document.status == ProcessingStatus.complete,
+                )
+                .order_by(Document.created_at.desc())
+                .first()
+            )
+            if prior_doc:
+                prior_metrics = (prior_doc.extracted_entities or {}).get("metrics")
+        anomalies = anomaly_detection.run_stage3(document.document_type, stage2, prior_metrics)
         db.query(Anomaly).filter_by(document_id=document_id).delete()
         for a in anomalies:
             db.add(Anomaly(document_id=document_id, **a))
@@ -210,6 +243,7 @@ def run_contradiction_detection_task(project_id: str):
         doc_dicts = [
             {
                 "id": d.id,
+                "filename": d.filename,
                 "document_type": d.document_type,
                 "extracted_entities": d.extracted_entities or {},
                 "primary_parties": d.primary_parties or [],

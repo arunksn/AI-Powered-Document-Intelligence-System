@@ -179,11 +179,15 @@ def detect_financial_statement_anomalies(extraction: dict, prior_period_metrics:
     return anomalies
 
 
-def run_stage3(document_type: str, extraction: dict) -> list[dict]:
+def run_stage3(document_type: str, extraction: dict, prior_period_metrics: dict | None = None) -> list[dict]:
+    """`prior_period_metrics` is an optional fallback (e.g. an earlier
+    financial statement in the same project); a comparative column found
+    in the statement itself takes precedence."""
     if document_type in ("contract", "nda", "rfp"):
         return detect_contract_anomalies(extraction)
     if document_type == "invoice":
         return detect_invoice_anomalies(extraction)
     if document_type == "financial_statement":
-        return detect_financial_statement_anomalies(extraction)
+        prior = extraction.get("prior_period_metrics") or prior_period_metrics
+        return detect_financial_statement_anomalies(extraction, prior)
     return []

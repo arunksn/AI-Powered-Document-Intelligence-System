@@ -46,7 +46,7 @@ NAMED_CLAUSE_PATTERNS = {
     "insurance": ["insurance", "commercial general liability", "professional liability"],
     "force_majeure": ["force majeure", "act of god"],
     "assignment": ["assignment", "assign this agreement", "assign its rights"],
-    "renewal": ["renewal", "automatic renewal", "renew automatically"],
+    "renewal": ["renewal", "automatic renewal", "renew automatically", "renews automatically"],
     "warranty": ["warranty", "warranties", "warrants that"],
     "audit": ["audit rights", "right to audit", "inspection rights"],
 }
@@ -188,13 +188,24 @@ FINANCIAL_METRIC_PATTERNS = {
 
 def extract_financial_statement(raw_text: str, tables: list[dict]) -> dict:
     metrics = {}
+    prior_period_metrics = {}
     for name, pattern in FINANCIAL_METRIC_PATTERNS.items():
         m = re.search(pattern, raw_text, re.IGNORECASE)
         if m:
             try:
                 metrics[name] = float(m.group(1).replace(",", ""))
             except ValueError:
-                pass
+                continue
+            # Comparative statements put the prior period in a second column
+            # on the same line ("Revenue | 1,250,000 | 900,000"); capture it
+            # so Stage 3 can run the year-over-year check.
+            rest_of_line = raw_text[m.end():].split("\n", 1)[0]
+            prior = re.match(r"[\s|]*\$?\s?\(?([\d,]+\.?\d*)\)?", rest_of_line)
+            if prior and prior.group(1).replace(",", "").replace(".", "").isdigit():
+                try:
+                    prior_period_metrics[name] = float(prior.group(1).replace(",", ""))
+                except ValueError:
+                    pass
 
     period_match = re.search(
         r"(?:fiscal\s+year|period\s+ended|for\s+the\s+year\s+ended)[:\s]*([A-Za-z0-9,\- ]{6,30})",
@@ -203,6 +214,7 @@ def extract_financial_statement(raw_text: str, tables: list[dict]) -> dict:
 
     return {
         "metrics": metrics,
+        "prior_period_metrics": prior_period_metrics,
         "reporting_period": period_match.group(1).strip() if period_match else None,
         "source_tables_count": len(tables),
     }

@@ -7,6 +7,52 @@ import SeverityBadge from "../components/SeverityBadge.jsx";
 
 const STAGE_ORDER = [0, 1, 2, 3, 4, 5];
 
+const money = (v) => (v != null ? `$${Number(v).toLocaleString()}` : "—");
+const label = (s) => s.replace(/_/g, " ");
+
+function ExtractionSummary({ output }) {
+  if (output.type === "invoice") {
+    return (
+      <div className="text-sm space-y-1">
+        <p><span className="text-inkfaint">Vendor:</span> {output.vendor || "not found"}</p>
+        <p><span className="text-inkfaint">Invoice number:</span> {output.invoice_number || "not found"}</p>
+        <p><span className="text-inkfaint">Line items:</span> {output.line_items?.length || 0}</p>
+        <p><span className="text-inkfaint">Tax / total:</span> {money(output.tax)} / {money(output.total)}</p>
+        <p><span className="text-inkfaint">Due date:</span> {output.due_date || "not found"}</p>
+        {output.payment_terms_days != null && (
+          <p><span className="text-inkfaint">Payment terms:</span> {output.payment_terms_days} days</p>
+        )}
+      </div>
+    );
+  }
+  if (output.type === "financial_statement") {
+    const metrics = Object.entries(output.metrics || {});
+    return (
+      <div className="text-sm space-y-1">
+        {output.reporting_period && <p><span className="text-inkfaint">Period:</span> {output.reporting_period}</p>}
+        {metrics.length === 0 && <p className="text-inkfaint">No named financial metrics found.</p>}
+        {metrics.map(([k, v]) => (
+          <p key={k}><span className="text-inkfaint capitalize">{label(k)}:</span> {money(v)}</p>
+        ))}
+      </div>
+    );
+  }
+  if (output.clauses) {
+    return (
+      <div className="text-sm space-y-1">
+        <p>
+          <span className="text-inkfaint">Clauses found:</span>{" "}
+          {(output.named_clauses_detected || []).map(label).join(", ") || "none"}
+        </p>
+        {output.missing_standard_clauses?.length > 0 && (
+          <p><span className="text-inkfaint">Standard clauses not found:</span> {output.missing_standard_clauses.map(label).join(", ")}</p>
+        )}
+      </div>
+    );
+  }
+  return <p className="text-sm text-inkfaint">{output.note || "No structured fields for this document type."}</p>;
+}
+
 function renderStageOutput(stageNumber, output) {
   if (!output) return null;
   if (stageNumber === 0) {
@@ -29,6 +75,9 @@ function renderStageOutput(stageNumber, output) {
         {output.governing_jurisdiction && <p><span className="text-inkfaint">Jurisdiction:</span> {output.governing_jurisdiction}</p>}
       </div>
     );
+  }
+  if (stageNumber === 2) {
+    return <ExtractionSummary output={output} />;
   }
   if (stageNumber === 3) {
     const anomalies = output.anomalies || [];
@@ -86,7 +135,7 @@ export default function DocumentProcessing() {
 
   useEffect(() => { load(); }, [load]);
 
-  useDocumentSocket(documentId, (msg) => {
+  const connected = useDocumentSocket(documentId, (msg) => {
     if (msg.type === "stage_update") {
       setStages((prev) => ({
         ...prev,
@@ -100,6 +149,9 @@ export default function DocumentProcessing() {
     }
     if (msg.type === "status") {
       setDocument((prev) => (prev ? { ...prev, status: msg.status, error_message: msg.error || prev.error_message } : prev));
+      // Refresh the document row so fields set during processing (type,
+      // low-quality flag, risk score) are current for the banners above.
+      if (msg.status === "complete") load();
     }
   });
 
@@ -113,10 +165,16 @@ export default function DocumentProcessing() {
       <h1 className="font-display text-3xl font-semibold text-ink mt-2">{document.filename}</h1>
       <p className="text-inkfaint text-sm mt-1">
         Processing pipeline — each stage streams its result as soon as it finishes.
+        You can open a finished stage while later stages are still running.
       </p>
+      {(document.status === "queued" || document.status === "processing") && (
+        <p className={`mt-2 font-mono text-xs ${connected ? "text-ok" : "text-warn"}`}>
+          {connected ? "● Live updates connected" : "○ Reconnecting to live updates…"}
+        </p>
+      )}
 
       {document.status === "failed" && (
-        <div className="mt-4 border border-critical/30 bg-critical/5 rounded-md p-4 text-sm text-critical flex items-center justify-between">
+        <div className="mt-4 border border-critical/30 bg-critical/5 rounded-md p-4 text-sm text-critical flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <p className="font-semibold">Processing Failed</p>
             <p className="mt-0.5">{document.error_message || "An unexpected error occurred during processing."}</p>
@@ -141,7 +199,7 @@ export default function DocumentProcessing() {
       )}
 
       {document.status === "complete" && (
-        <div className="mt-5 flex items-center justify-between border border-ok/20 bg-ok/5 rounded-md p-3">
+        <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-ok/20 bg-ok/5 rounded-md p-3">
           <p className="text-sm text-ink">Processing is complete. You can review the full document intelligence report.</p>
           <button
             onClick={() => navigate(`/documents/${documentId}`)}

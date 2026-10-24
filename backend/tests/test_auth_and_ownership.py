@@ -7,7 +7,7 @@ cross-user data leak.
 """
 
 
-def signup(client, email="alice@acme.test", password="correcthorse123", name="Alice"):
+def signup(client, email="alice@acme.test", password="CorrectHorse123!", name="Alice"):
     resp = client.post("/api/auth/signup", json={"email": email, "password": password, "name": name})
     assert resp.status_code == 200, resp.text
     return resp.json()["access_token"]
@@ -18,7 +18,7 @@ def auth_headers(token):
 
 
 def test_signup_returns_token_and_user(client):
-    resp = client.post("/api/auth/signup", json={"email": "new@acme.test", "password": "correcthorse123", "name": "New"})
+    resp = client.post("/api/auth/signup", json={"email": "new@acme.test", "password": "CorrectHorse123!", "name": "New"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["user"]["email"] == "new@acme.test"
@@ -27,7 +27,7 @@ def test_signup_returns_token_and_user(client):
 
 def test_signup_rejects_duplicate_email(client):
     signup(client, email="dup@acme.test")
-    resp = client.post("/api/auth/signup", json={"email": "dup@acme.test", "password": "anotherpassword"})
+    resp = client.post("/api/auth/signup", json={"email": "dup@acme.test", "password": "AnotherPassword1!"})
     assert resp.status_code == 409
 
 
@@ -37,19 +37,19 @@ def test_signup_rejects_weak_password(client):
 
 
 def test_signup_rejects_invalid_email(client):
-    resp = client.post("/api/auth/signup", json={"email": "not-an-email", "password": "correcthorse123"})
+    resp = client.post("/api/auth/signup", json={"email": "not-an-email", "password": "CorrectHorse123!"})
     assert resp.status_code == 400
 
 
 def test_login_with_correct_password(client):
-    signup(client, email="login@acme.test", password="correcthorse123")
-    resp = client.post("/api/auth/login", json={"email": "login@acme.test", "password": "correcthorse123"})
+    signup(client, email="login@acme.test", password="CorrectHorse123!")
+    resp = client.post("/api/auth/login", json={"email": "login@acme.test", "password": "CorrectHorse123!"})
     assert resp.status_code == 200
     assert resp.json()["access_token"]
 
 
 def test_login_with_wrong_password_rejected(client):
-    signup(client, email="login2@acme.test", password="correcthorse123")
+    signup(client, email="login2@acme.test", password="CorrectHorse123!")
     resp = client.post("/api/auth/login", json={"email": "login2@acme.test", "password": "wrongpassword"})
     assert resp.status_code == 401
 

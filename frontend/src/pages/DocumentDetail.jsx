@@ -4,6 +4,20 @@ import { api } from "../api";
 import SeverityBadge from "../components/SeverityBadge.jsx";
 import RiskChart from "../components/RiskChart.jsx";
 import CrmSyncPanel from "../components/CrmSyncPanel.jsx";
+import { useDocumentSocket } from "../ws.js";
+
+const SEVERITY_HEADINGS = {
+  critical: "Critical — review before signing or paying",
+  warning: "Warnings — worth checking",
+  informational: "For information",
+};
+
+function formatEvidence(value) {
+  if (Array.isArray(value)) return value.map(formatEvidence).join(", ");
+  if (typeof value === "number") return value.toLocaleString();
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
 
 function EntityField({ label, value }) {
   if (value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) return null;
@@ -23,8 +37,9 @@ function ExtractionPanel({ documentType, entities }) {
   if (documentType === "invoice") {
     return (
       <div>
-        <div className="grid grid-cols-2 gap-x-6">
+        <div className="grid sm:grid-cols-2 gap-x-6">
           <EntityField label="Vendor" value={entities.vendor} />
+          <EntityField label="Payment terms" value={entities.payment_terms_days != null ? `${entities.payment_terms_days} days` : null} />
           <EntityField label="Invoice number" value={entities.invoice_number} />
           <EntityField label="Total" value={entities.total != null ? `$${entities.total.toLocaleString()}` : null} />
           <EntityField label="Tax" value={entities.tax != null ? `$${entities.tax.toLocaleString()}` : null} />
@@ -60,14 +75,40 @@ function ExtractionPanel({ documentType, entities }) {
   }
 
   if (documentType === "financial_statement") {
+    const prior = entities.prior_period_metrics || {};
+    const hasPrior = Object.keys(prior).length > 0;
+    const fmt = (v) => (v != null ? `$${Number(v).toLocaleString()}` : "—");
     return (
       <div>
         <EntityField label="Reporting period" value={entities.reporting_period} />
-        <div className="grid grid-cols-2 gap-x-6 mt-2">
-          {Object.entries(entities.metrics || {}).map(([k, v]) => (
-            <EntityField key={k} label={k.replace(/_/g, " ")} value={`$${Number(v).toLocaleString()}`} />
-          ))}
-        </div>
+        <table className="w-full text-sm mt-3">
+          <thead>
+            <tr className="text-left text-xs font-mono text-inkfaint uppercase border-b border-hairline">
+              <th className="pb-1 font-normal">Metric</th>
+              <th className="pb-1 font-normal text-right">This period</th>
+              {hasPrior && <th className="pb-1 font-normal text-right">Prior period</th>}
+              {hasPrior && <th className="pb-1 font-normal text-right">Change</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(entities.metrics || {}).map(([k, v]) => {
+              const p = prior[k];
+              const change = p ? ((v - p) / Math.abs(p)) * 100 : null;
+              return (
+                <tr key={k} className="border-b border-hairline/40 last:border-b-0">
+                  <td className="py-1.5 capitalize">{k.replace(/_/g, " ")}</td>
+                  <td className="py-1.5 text-right font-mono">{fmt(v)}</td>
+                  {hasPrior && <td className="py-1.5 text-right font-mono">{fmt(p)}</td>}
+                  {hasPrior && (
+                    <td className="py-1.5 text-right font-mono">
+                      {change != null ? `${change > 0 ? "+" : ""}${change.toFixed(1)}%` : "—"}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     );
   }
@@ -79,12 +120,18 @@ function ExtractionPanel({ documentType, entities }) {
       {Object.entries(clauses).map(([name, clause]) => (
         <div key={name} className="border border-hairline/60 rounded p-3">
           <div className="text-xs font-mono uppercase tracking-wide text-ledger mb-1">{name.replace(/_/g, " ")}</div>
-          {clause.days != null && <p className="text-sm">Term: {clause.days} days</p>}
+          {clause.days != null && clause.notice_days == null && clause.period_days == null && (
+            <p className="text-sm">Days specified: {clause.days}</p>
+          )}
           {clause.notice_days != null && <p className="text-sm">Notice period: {clause.notice_days} days</p>}
           {clause.period_days != null && <p className="text-sm">Period: {clause.period_days} days</p>}
           {clause.period_years != null && <p className="text-sm">Period: {clause.period_years} years</p>}
           {clause.amounts?.length > 0 && <p className="text-sm">Amounts referenced: {clause.amounts.join(", ")}</p>}
-          {clause.excerpt && <p className="text-xs text-inkfaint mt-1 italic">"{clause.excerpt.slice(0, 220)}…"</p>}
+          {clause.excerpt && (
+            <p className="text-xs text-inkfaint mt-1 italic">
+              "{clause.excerpt.length > 220 ? `${clause.excerpt.slice(0, 220)}…` : clause.excerpt}"
+            </p>
+          )}
         </div>
       ))}
       {entities.missing_standard_clauses?.length > 0 && (
@@ -117,6 +164,13 @@ export default function DocumentDetail() {
 
   useEffect(() => { load(); }, [load]);
 
+  // CRM sync runs after the pipeline finishes, so its status can change
+  // while this page is open (including after a retry); the worker
+  // announces each change on the document's WebSocket channel.
+  useDocumentSocket(documentId, (msg) => {
+    if (msg.type === "crm_sync_update") api.getCrmSync(documentId).then(setCrmSync);
+  });
+
   const handleDelete = async () => {
     if (!window.confirm(`Delete "${document.filename}"? This removes its extraction results, anomalies, and CRM sync record. This can't be undone.`)) {
       return;
@@ -141,8 +195,8 @@ export default function DocumentDetail() {
       <Link to={`/projects/${document.project_id}`} className="font-mono text-xs text-inkfaint hover:text-ledger">
         &larr; Back to project
       </Link>
-      <div className="flex items-baseline justify-between mt-2">
-        <h1 className="font-display text-3xl font-semibold text-ink">{document.filename}</h1>
+      <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-3 mt-2">
+        <h1 className="font-display text-2xl sm:text-3xl font-semibold text-ink break-all">{document.filename}</h1>
         <div className="flex items-center gap-4">
           <span className="font-mono text-xs uppercase tracking-wide text-inkfaint">
             {document.document_type?.replace(/_/g, " ")}
@@ -164,12 +218,12 @@ export default function DocumentDetail() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-6 mt-8">
-        <div className="col-span-2 space-y-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+        <div className="lg:col-span-2 space-y-8 min-w-0">
           <section>
             <h2 className="font-display text-xl text-ink mb-3">Extracted entities</h2>
             <div className="border border-hairline rounded-md p-4 bg-surface">
-              <div className="grid grid-cols-2 gap-x-6 mb-3">
+              <div className="grid sm:grid-cols-2 gap-x-6 mb-3">
                 <EntityField label="Parties" value={document.primary_parties} />
                 <EntityField label="Jurisdiction" value={document.governing_jurisdiction} />
                 <EntityField label="Dates" value={Object.values(document.key_dates || {}).flat()} />
@@ -187,6 +241,9 @@ export default function DocumentDetail() {
                 {["critical", "warning", "informational"].map((sev) =>
                   grouped[sev].length > 0 && (
                     <div key={sev}>
+                      <h3 className="font-mono text-xs uppercase tracking-wide text-inkfaint mb-2">
+                        {SEVERITY_HEADINGS[sev]} ({grouped[sev].length})
+                      </h3>
                       {grouped[sev].map((a) => (
                         <div key={a.id} className="flex items-start gap-3 border border-hairline rounded-md p-3 bg-surface mb-2">
                           <SeverityBadge severity={a.severity} />
@@ -195,7 +252,14 @@ export default function DocumentDetail() {
                             {a.evidence && Object.keys(a.evidence).length > 0 && (
                               <details className="mt-2">
                                 <summary className="cursor-pointer text-xs font-mono text-inkfaint">View evidence</summary>
-                                <pre className="mt-2 text-xs font-mono text-inkfaint whitespace-pre-wrap">{JSON.stringify(a.evidence, null, 2)}</pre>
+                                <dl className="mt-2 text-xs grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
+                                  {Object.entries(a.evidence).map(([k, v]) => (
+                                    <div key={k} className="contents">
+                                      <dt className="font-mono text-inkfaint capitalize">{k.replace(/_/g, " ")}</dt>
+                                      <dd className="text-ink break-words">{formatEvidence(v)}</dd>
+                                    </div>
+                                  ))}
+                                </dl>
                               </details>
                             )}
                           </div>
@@ -216,7 +280,7 @@ export default function DocumentDetail() {
 
         <div>
           <h2 className="font-display text-xl text-ink mb-3">Risk score</h2>
-          <div className="border border-hairline rounded-md p-4 bg-surface sticky top-6">
+          <div className="border border-hairline rounded-md p-4 bg-surface lg:sticky lg:top-6">
             <RiskChart riskScore={document.risk_score} breakdown={document.risk_breakdown?.breakdown} />
           </div>
         </div>

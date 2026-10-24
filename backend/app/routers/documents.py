@@ -79,6 +79,7 @@ async def upload_document(
         status=models.ProcessingStatus.queued,
     )
     db.add(document)
+    db.add(models.DocumentFile(document_id=doc_id, data=contents))
     db.commit()
     db.refresh(document)
 
@@ -162,7 +163,7 @@ def reprocess_document(
     db: Session = Depends(get_db),
 ):
     document = _get_owned_document(document_id, current_user, db)
-    if not os.path.exists(document.filepath):
+    if not os.path.exists(document.filepath) and db.get(models.DocumentFile, document_id) is None:
         raise HTTPException(410, "Original file no longer available on disk (ephemeral storage) -- re-upload to reprocess.")
     document.status = models.ProcessingStatus.queued
     document.current_stage = 0

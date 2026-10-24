@@ -24,12 +24,12 @@ export function onUnauthorized(fn) {
 async function request(path, options = {}) {
   const token = getToken();
   const res = await fetch(`${API_URL}${path}`, {
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
-    ...options,
   });
   const isAuthRoute = path.startsWith("/api/auth/");
   if (res.status === 401 && !isAuthRoute) {

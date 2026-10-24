@@ -10,11 +10,16 @@ const STATUS_STYLE = {
 export default function CrmSyncPanel({ documentId, syncStatus, onRetried }) {
   const [retrying, setRetrying] = useState(false);
 
+  const [error, setError] = useState(null);
+
   const handleRetry = async () => {
     setRetrying(true);
+    setError(null);
     try {
       await api.retryCrmSync(documentId);
       onRetried && onRetried();
+    } catch (err) {
+      setError(err.message || "Retry failed");
     } finally {
       setRetrying(false);
     }
@@ -31,7 +36,7 @@ export default function CrmSyncPanel({ documentId, syncStatus, onRetried }) {
   const style = STATUS_STYLE[syncStatus.status] || STATUS_STYLE.pending;
 
   return (
-    <div className="border border-hairline rounded-md p-4 bg-surface flex items-center justify-between">
+    <div className="border border-hairline rounded-md p-4 bg-surface flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div>
         <span className={`inline-block px-2 py-0.5 rounded border text-xs font-mono uppercase tracking-wide ${style}`}>
           {syncStatus.status}
@@ -45,6 +50,15 @@ export default function CrmSyncPanel({ documentId, syncStatus, onRetried }) {
         {syncStatus.status === "failed" && syncStatus.last_error && (
           <p className="text-xs text-critical mt-1">{syncStatus.last_error}</p>
         )}
+        {syncStatus.external_record_id?.startsWith("mock-") && (
+          <p className="text-xs text-warn mt-1">
+            Demo mode: no CRM credentials are configured, so no record was actually sent to {syncStatus.provider}.
+          </p>
+        )}
+        {syncStatus.status === "pending" && (
+          <p className="text-xs text-inkfaint mt-1">Sending to the CRM… this updates automatically.</p>
+        )}
+        {error && <p className="text-xs text-critical mt-1">Couldn't retry: {error}</p>}
       </div>
       {syncStatus.status === "failed" && (
         <button

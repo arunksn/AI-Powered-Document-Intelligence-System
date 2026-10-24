@@ -35,6 +35,11 @@ def _party_set(document: dict) -> set[str]:
     return result
 
 
+def _name(document: dict) -> str:
+    """Human-readable label for explanations; falls back to a short id."""
+    return document.get("filename") or f"Document {document['id'][:8]}"
+
+
 def _shares_party(a: dict, b: dict) -> bool:
     pa, pb = _party_set(a), _party_set(b)
     return bool(pa and pb and pa & pb)
@@ -105,8 +110,8 @@ def find_contradictions(documents: list[dict]) -> list[dict]:
                     "value_a": f"{days_a} days",
                     "value_b": f"{days_b} days",
                     "explanation": (
-                        f"Document {doc_a['id'][:8]} specifies a payment term of {days_a} days while "
-                        f"document {doc_b['id'][:8]}, which shares a named party, specifies "
+                        f"{_name(doc_a)} specifies a payment term of {days_a} days while "
+                        f"{_name(doc_b)}, which names the same party, specifies "
                         f"{days_b} days for the same relationship."
                     ),
                 })

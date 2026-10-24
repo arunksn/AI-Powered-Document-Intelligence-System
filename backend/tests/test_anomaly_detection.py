@@ -104,3 +104,19 @@ def test_yoy_change_exceeding_threshold_flagged():
     prior = {"revenue": 1_000_000}  # 100% change, exceeds default 35% threshold
     anomalies = anomaly_detection.detect_financial_statement_anomalies(extraction, prior_period_metrics=prior)
     assert "warning" in _severities(anomalies, "yoy_change")
+
+
+def test_yoy_change_uses_comparative_column_from_statement():
+    from app.pipeline import extraction
+    text = "Income Statement\nTotal Revenue | 1,250,000 | 820,000\nNet Income | 95,000 | 88,000\n"
+    stage2 = extraction.extract_financial_statement(text, [])
+    assert stage2["prior_period_metrics"] == {"revenue": 820000.0, "net_income": 88000.0}
+    anomalies = anomaly_detection.run_stage3("financial_statement", stage2)
+    yoy = [a for a in anomalies if a["category"] == "yoy_change"]
+    assert [a["evidence"]["metric"] for a in yoy] == ["revenue"]  # +52%; net income +8% stays quiet
+
+
+def test_yoy_change_falls_back_to_prior_statement_in_project():
+    stage2 = {"metrics": {"revenue": 500000.0}, "prior_period_metrics": {}}
+    anomalies = anomaly_detection.run_stage3("financial_statement", stage2, {"revenue": 1000000.0})
+    assert any(a["category"] == "yoy_change" for a in anomalies)

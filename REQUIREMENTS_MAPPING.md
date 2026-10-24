@@ -14,7 +14,7 @@ This repository is the implementation baseline for the Intelligent Document Proc
 | Real-time stage streaming | Complete | WebSocket + Redis pub/sub bridge |
 | Document classification | Complete | Contract/invoice/financial statement/RFP/NDA/other classification plus parties/dates/jurisdiction |
 | Entity and clause extraction | Strong | Type-specific extraction plus named-clause inventory and values; intentionally rule-based for CPU/memory constraints |
-| Anomaly detection | Strong | Contract, invoice, and financial checks; severity + plain-English explanations; configurable financial ratio ranges |
+| Anomaly detection | Strong | Contract, invoice, and financial checks; severity + plain-English explanations; configurable financial ratio ranges; YoY check from the statement's comparative column, falling back to a prior statement in the project |
 | Risk scoring | Complete | 0–100 score and category breakdown |
 | Cross-document contradictions | Strong | Payment terms, revenue-vs-invoice totals, party/vendor matching; explicit Stage 5 result |
 | CRM sync | Complete | Notion/Airtable upsert by SHA-256 content hash; public document link |
@@ -24,6 +24,8 @@ This repository is the implementation baseline for the Intelligent Document Proc
 | Contradiction UI | Complete | Project-level side-by-side values |
 | CRM retry UI | Complete | Failed sync retry control |
 | CPU-bound / Railway memory constraints | Complete | Celery worker, lazy spaCy model loading, model cycling, idle unload, Tesseract external process |
+| Classifier accuracy (≥85% on 20 docs) | Complete | `backend/tests/test_classification_accuracy.py` (20 labelled samples across all 6 types) |
+| Test document set | Complete | `sample_documents/`, one file per format, with expected results |
 | Public website deployment readiness | Prepared | Railway service layout, environment configuration, production public URL setting |
 
 ## Bonus tasks
