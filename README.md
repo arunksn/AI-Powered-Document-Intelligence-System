@@ -256,21 +256,7 @@ use `docker compose up --build` for the complete local stack. Plain `npm run dev
 also proxies `/api` and `/ws` to `localhost:8000`; Docker Compose sets the
 development proxy target to `http://web:8000`.
 
-## Deploying to Railway
-
-This repo deploys as **three Railway services** from the same GitHub repo:
-
-1. **web** — `backend/`, start command from `Procfile`'s `web:` line.
-   Attach Railway's Postgres and Redis plugins; Railway injects
-   `DATABASE_URL` and you set `REDIS_URL` from the Redis plugin's
-   connection string.
-2. **worker** — same `backend/` source, override the start command to
-   the `Procfile`'s `worker:` line (Railway lets you set a custom start
-   command per service from the same repo/root).
-3. **frontend** — `frontend/`, build with `npm run build`, serve `dist/`
-   with a static file server (e.g. `npx serve -s dist -l $PORT`). Set
-   `VITE_API_URL` / `VITE_WS_URL` to the deployed **web** service's public
-   URL (use `wss://` for the WebSocket URL once Railway terminates TLS).
+## Railway
 
 For the Railway free-tier worker, keep `CELERY_CONCURRENCY=1` so the
 model-memory budget applies to one active CPU inference process at a time.

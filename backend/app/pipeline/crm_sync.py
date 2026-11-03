@@ -175,3 +175,5 @@ def sync_document_to_crm(document, project) -> str:
         return f"mock-notion-{document.id[:8]}"
     return sync_to_notion(payload)
 
+# Fix: crm_sync.py should handle exceptions and log errors instead of raising them, to prevent the entire sync process from failing due to a single record's issue.
+# Issue: Set NOTION_API_KEY, NOTION_DATABASE_ID, And AirTable complete total set up xd (vercel)Deploying.
